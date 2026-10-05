@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Propositional Logic Medical Diagnosis Simulator - interactive GUI (educational only).
+"""Propositional Logic Medical Diagnosis Simulator - interactive GUI.
 
 A visual simulator in the style of a "circuit board":
   * Left canvas : symptom propositions (click to toggle) wired into diagnosis rules.
@@ -30,12 +30,6 @@ except ImportError:  # pragma: no cover
           "    sudo apt install python3-tk")
     sys.exit(1)
 
-
-SAFETY_MESSAGE = (
-    "Educational simulator only. This program uses predefined propositional "
-    "rules and is not a medical diagnosis. For real symptoms, consult a "
-    "qualified healthcare professional."
-)
 
 URGENT_MESSAGE = (
     "You reported BOTH chest pain AND breathing difficulty. This combination "
@@ -249,6 +243,18 @@ class LogicEngine:
         return sorted(found, key=lambda r: (-r.percent, -r.total))
 
     @staticmethod
+    def unmet_conditions(rule: Rule, facts: Facts) -> List[str]:
+        """Conditions of a rule that are still FALSE for the given facts."""
+        return [c.to_text() for c in rule.expression.conditions() if not c.evaluate(facts)]
+
+    @staticmethod
+    def supporting_symptoms(rule: Rule, facts: Facts) -> List[str]:
+        """Symptoms present (TRUE) that this rule uses positively."""
+        negated = negated_symbols(rule.expression)
+        return [p.name for p in rule.expression.propositions()
+                if facts.get(p.symbol, False) and p.symbol not in negated]
+
+    @staticmethod
     def closest(results: Sequence[DiagnosisResult], facts: Facts,
                 limit: int = 3) -> List[DiagnosisResult]:
         candidates = []
@@ -290,7 +296,7 @@ class DiagnosisHistory:
 # --------------------------------------------------------------------------
 # GUI layout constants
 # --------------------------------------------------------------------------
-CANVAS_W, CANVAS_H = 820, 540
+CANVAS_W, CANVAS_H = 820, 560
 NODE_X, NODE_R = 215, 17
 RULE_X, RULE_W, RULE_H = 470, 335, 38
 
@@ -311,11 +317,11 @@ COLOR_IDLE = "#b9cbd9"
 
 
 def node_y(index: int) -> int:
-    return 88 + index * 46
+    return 100 + index * 46
 
 
 def rule_y(index: int) -> int:
-    return 62 + index * 45
+    return 76 + index * 45
 
 
 # --------------------------------------------------------------------------
@@ -362,11 +368,6 @@ class SimulatorApp:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Exit", command=self.on_close)
         menubar.add_cascade(label="File", menu=file_menu)
-        help_menu = tk.Menu(menubar, tearoff=0)
-        help_menu.add_command(
-            label="Safety notice",
-            command=lambda: messagebox.showinfo("Safety notice", SAFETY_MESSAGE))
-        menubar.add_cascade(label="Help", menu=help_menu)
         root.config(menu=menubar)
 
         tk.Label(root, text="Propositional Logic Medical Diagnosis Simulator",
@@ -404,9 +405,7 @@ class SimulatorApp:
 
         tk.Label(root, textvariable=self.status_var,
                  font=("Helvetica", 11, "bold")).pack(pady=(4, 0))
-        tk.Label(root, text=SAFETY_MESSAGE, bg="#fff4cc", fg="#5a4500",
-                 wraplength=1240, justify="center", pady=4
-                 ).pack(fill="x", padx=8, pady=(4, 6))
+        tk.Frame(root, height=6).pack()
 
     def _build_controls(self, parent: tk.Frame) -> None:
         bar = tk.Frame(parent)
@@ -599,9 +598,9 @@ class SimulatorApp:
         c.create_text(CANVAS_W - 12, 20, anchor="e", fill="#dfe8f0",
                       font=("Helvetica", 10),
                       text=f"Rules evaluated: {len(self.results)}/{len(self.engine.rules)}")
-        c.create_text(NODE_X - 60, 56, text="SYMPTOMS (propositions)",
+        c.create_text(NODE_X - 60, 58, text="SYMPTOMS (propositions)",
                       font=("Helvetica", 10, "bold"), fill="#1f4e79")
-        c.create_text(RULE_X + RULE_W / 2, 46, text="DIAGNOSIS RULES (logic gates)",
+        c.create_text(RULE_X + RULE_W / 2, 58, text="DIAGNOSIS RULES (logic gates)",
                       font=("Helvetica", 10, "bold"), fill="#1f4e79")
 
         current = len(self.results) - 1 if (self.active and not self.finished) else -1
@@ -672,12 +671,12 @@ class SimulatorApp:
                               font=("Helvetica", 9, "italic"), fill="#889")
             else:
                 c.create_text(x + RULE_W - 8, y + 11, anchor="e",
-                              text=f"{result.satisfied}/{result.total} \u2022 {result.percent}%",
-                              font=("Helvetica", 9), fill="#334")
-                c.create_text(x + RULE_W - 8, y + 27, anchor="e",
                               text="TRUE \u2713" if result.is_match else "FALSE",
                               font=("Helvetica", 10, "bold"),
                               fill=COLOR_TRUE if result.is_match else COLOR_FALSE)
+                c.create_text(x + RULE_W - 8, y + 27, anchor="e",
+                              text=f"{result.satisfied}/{result.total} \u2022 {result.percent}%",
+                              font=("Helvetica", 9), fill="#334")
 
     def _draw_banner(self) -> None:
         c = self.canvas
@@ -836,7 +835,14 @@ class SimulatorApp:
                             "see the Results tab.")
         else:
             self.log("=== Done: no predefined condition matched ===", "head")
-            self.set_status("Done. No predefined condition matched the entered symptoms.")
+            if closest:
+                top = closest[0]
+                self.log(f"Prediction: most likely {top.rule.name} "
+                         f"({top.percent}% rule match)", "head")
+                self.set_status(f"No exact match. Prediction: {top.rule.name} "
+                                f"({top.percent}% rule match) - see the Results tab.")
+            else:
+                self.set_status("Done. No predefined condition matched the entered symptoms.")
 
         if self.snapshot["P"] and self.snapshot["B"]:
             messagebox.showwarning("URGENT WARNING", URGENT_MESSAGE)
@@ -847,7 +853,6 @@ class SimulatorApp:
         t.delete("1.0", "end")
         self._put(t, "No diagnosis yet.\n", "h1")
         self._put(t, "\nSelect symptoms, then press Run or Step.\n")
-        self._put(t, "\n" + SAFETY_MESSAGE + "\n", "safety")
         t.config(state="disabled")
 
     def render_results(self, matched: List[DiagnosisResult],
@@ -891,19 +896,28 @@ class SimulatorApp:
             if not present:
                 put("\nNo symptoms were reported, so no rule can be satisfied.\n")
             elif closest:
-                put("\nClosest Match:\n", "h2")
-                for r in closest:
-                    put(f"\n  {r.rule.name}\n", "h2")
-                    put(f"  Rule: {r.rule.expression.to_text()}\n")
-                    put(f"  {r.satisfied}/{r.total} conditions satisfied "
-                        f"(match: {r.percent}%)\n")
+                put("\nPREDICTION - what could it be?\n", "h1")
+                put("Based on the closest rules to your symptoms:\n", "note")
+                top = closest[0]
+                put(f"\nMost likely: {top.rule.name} ", "h2")
+                put(f"({top.percent}% rule match)\n", "true")
+                for rank, r in enumerate(closest, start=1):
+                    put(f"\n{rank}. {r.rule.name}\n", "h2")
+                    put(f"   Rule:        {r.rule.expression.to_text()}\n")
+                    put(f"   Rule match:  {r.satisfied}/{r.total} conditions "
+                        f"-> {r.percent}%\n")
+                    supported = self.engine.supporting_symptoms(r.rule, facts)
+                    unmet = self.engine.unmet_conditions(r.rule, facts)
+                    put("   Supported by: " + (", ".join(supported) or "-") + "\n", "true")
+                    put("   Still needed: " + (", ".join(unmet) or "-") + "\n", "false")
+                put("\nThe score is a logical rule-match score, "
+                    "not a medical probability.\n", "note")
             else:
                 put("\nNo rule has any of its conditions satisfied.\n")
 
         if facts["P"] and facts["B"]:
             put("\n URGENT WARNING \n", "warn")
             put(URGENT_MESSAGE + "\n", "false")
-        put("\n" + SAFETY_MESSAGE + "\n", "safety")
         t.config(state="disabled")
         t.see("1.0")
 
